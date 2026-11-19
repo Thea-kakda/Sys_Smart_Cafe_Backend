@@ -1,0 +1,1 @@
+{"version":"0.2.0","configurations":[{"type":"java","name":"Run SMART Coffee Auth","request":"launch","mainClass":"com.smartcoffee.identity.SmartCoffeeApplication","projectName":"smart-coffee-auth-backend"}]}

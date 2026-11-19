@@ -1,0 +1,22 @@
+Customer WebApp / POS
+        ↓
+Cart
+        ↓
+Store Catalog
+        ↓
+Promotion + Loyalty
+        ↓
+Inventory Reservation
+        ↓
+Order
+        ↓
+Payment
+        ↓
+Production Tickets
+        ├── BARISTA
+        ├── KITCHEN
+        └── BAKERY
+        ↓
+Order Ready
+        ↓
+Receipt + Notification + Audit

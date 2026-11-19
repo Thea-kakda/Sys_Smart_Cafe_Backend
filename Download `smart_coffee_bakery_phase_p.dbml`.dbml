@@ -1,0 +1,738 @@
+Project smart_coffee_bakery {
+  database_type: 'PostgreSQL'
+  Note: 'Conceptual modular-monolith schema for Customer Web, Dashboard, POS and CKD/KDS. Validate against Flyway and ADRs before implementation.'
+}
+
+Enum user_status { ACTIVE DISABLED LOCKED }
+Enum order_source { CUSTOMER_WEB POS }
+Enum fulfillment_type { DINE_IN PICKUP DELIVERY }
+Enum order_status { RECEIVED AWAITING_PAYMENT CONFIRMED PREPARING READY COMPLETED CANCELLED }
+Enum payment_status { PENDING PROCESSING PAID FAILED EXPIRED CANCELLED REFUNDED PARTIALLY_REFUNDED }
+Enum payment_method_type { CASH KHQR CARD WALLET OTHER }
+Enum reservation_status { ACTIVE CONSUMED RELEASED EXPIRED }
+Enum stock_transaction_type { STOCK_IN ADJUSTMENT SALE_CONSUMPTION RETURN DAMAGED }
+Enum recipe_status { DRAFT ACTIVE RETIRED }
+Enum selection_type { SINGLE MULTIPLE }
+Enum station_type { BARISTA KITCHEN BAKERY PACKING PICKUP }
+Enum production_status { PENDING PREPARING READY COMPLETED CANCELLED }
+Enum promotion_status { DRAFT ACTIVE PAUSED EXPIRED CANCELLED }
+Enum discount_type { PERCENTAGE FIXED_AMOUNT }
+Enum redemption_status { RESERVED REDEEMED RELEASED EXPIRED }
+Enum idempotency_status { PROCESSING COMPLETED FAILED }
+Enum outbox_status { PENDING PROCESSING PUBLISHED FAILED }
+Enum inbox_status { RECEIVED PROCESSING PROCESSED FAILED }
+Enum delivery_channel { IN_APP WEBSOCKET PUSH EMAIL }
+Enum delivery_status { PENDING PROCESSING DELIVERED FAILED SKIPPED CANCELLED }
+
+Table identity.users {
+  user_id uuid [pk]
+  full_name varchar(150) [not null]
+  email varchar(320)
+  normalized_email varchar(320) [unique]
+  phone varchar(30)
+  preferred_language varchar(10) [not null, default: 'en-US']
+  status user_status [not null, default: 'ACTIVE']
+  security_version bigint [not null, default: 0]
+  created_at timestamptz [not null]
+  updated_at timestamptz [not null]
+  deleted_at timestamptz
+  version bigint [not null, default: 0]
+}
+
+Table identity.user_credentials {
+  user_id uuid [pk, ref: > identity.users.user_id]
+  password_hash text [not null]
+  password_algorithm varchar(30) [not null]
+  failed_login_count int [not null, default: 0]
+  locked_until timestamptz
+  password_changed_at timestamptz [not null]
+  created_at timestamptz [not null]
+  updated_at timestamptz [not null]
+}
+
+Table identity.roles {
+  role_id uuid [pk]
+  role_code varchar(60) [not null, unique]
+  role_name varchar(120) [not null]
+  description text
+  system_role boolean [not null, default: false]
+}
+
+Table identity.permissions {
+  permission_id uuid [pk]
+  permission_code varchar(120) [not null, unique]
+  resource varchar(80) [not null]
+  action varchar(60) [not null]
+  description text
+}
+
+Table identity.role_permissions {
+  role_id uuid [not null, ref: > identity.roles.role_id]
+  permission_id uuid [not null, ref: > identity.permissions.permission_id]
+  granted_at timestamptz [not null]
+  indexes { (role_id, permission_id) [pk] }
+}
+
+Table organization.stores {
+  store_id uuid [pk]
+  store_code varchar(30) [not null, unique]
+  store_name varchar(150) [not null]
+  address text [not null]
+  phone varchar(30)
+  timezone varchar(64) [not null]
+  default_currency char(3) [not null]
+  default_language varchar(10) [not null, default: 'en-US']
+  active boolean [not null, default: true]
+  created_at timestamptz [not null]
+  updated_at timestamptz [not null]
+  version bigint [not null, default: 0]
+}
+
+Table identity.user_role_assignments {
+  assignment_id uuid [pk]
+  user_id uuid [not null, ref: > identity.users.user_id]
+  role_id uuid [not null, ref: > identity.roles.role_id]
+  store_id uuid [ref: > organization.stores.store_id]
+  assigned_by uuid [not null, ref: > identity.users.user_id]
+  assigned_at timestamptz [not null]
+  expires_at timestamptz
+  revoked_at timestamptz
+  version bigint [not null, default: 0]
+  indexes { (user_id, store_id, revoked_at) }
+}
+
+Table customer.customer_profiles {
+  customer_id uuid [pk]
+  user_id uuid [not null, unique, ref: > identity.users.user_id]
+  preferred_store_id uuid [ref: > organization.stores.store_id]
+  loyalty_number varchar(40) [unique]
+  birth_date date
+  marketing_opt_in boolean [not null, default: false]
+  created_at timestamptz [not null]
+  updated_at timestamptz [not null]
+  version bigint [not null, default: 0]
+}
+
+Table catalog.product_categories {
+  category_id uuid [pk]
+  parent_category_id uuid [ref: > catalog.product_categories.category_id]
+  category_code varchar(50) [not null, unique]
+  category_name varchar(100) [not null]
+  description text
+  image_object_key text
+  display_order int [not null, default: 0]
+  active boolean [not null, default: true]
+  version bigint [not null, default: 0]
+}
+
+Table production.production_stations {
+  station_id uuid [pk]
+  store_id uuid [not null, ref: > organization.stores.store_id]
+  station_code varchar(40) [not null]
+  station_name varchar(100) [not null]
+  station_type station_type [not null]
+  display_order int [not null, default: 0]
+  active boolean [not null, default: true]
+  version bigint [not null, default: 0]
+  indexes { (store_id, station_code) [unique] }
+}
+
+Table catalog.products {
+  product_id uuid [pk]
+  product_code varchar(50) [not null, unique]
+  category_id uuid [not null, ref: > catalog.product_categories.category_id]
+  product_name varchar(150) [not null]
+  description text
+  image_object_key text
+  base_price numeric(14,4) [not null]
+  currency_code char(3) [not null]
+  preparation_minutes int [not null, default: 0]
+  tax_rate numeric(9,6) [not null, default: 0]
+  customizable boolean [not null, default: false]
+  active boolean [not null, default: true]
+  created_at timestamptz [not null]
+  updated_at timestamptz [not null]
+  deleted_at timestamptz
+  version bigint [not null, default: 0]
+}
+
+Table catalog.store_products {
+  store_id uuid [not null, ref: > organization.stores.store_id]
+  product_id uuid [not null, ref: > catalog.products.product_id]
+  station_id uuid [ref: > production.production_stations.station_id]
+  override_price numeric(14,4)
+  available boolean [not null, default: true]
+  sold_out_until timestamptz
+  updated_at timestamptz [not null]
+  version bigint [not null, default: 0]
+  indexes { (store_id, product_id) [pk] }
+}
+
+Table catalog.customization_groups {
+  group_id uuid [pk]
+  group_code varchar(50) [not null, unique]
+  group_name varchar(100) [not null]
+  selection_type selection_type [not null]
+  minimum_selections int [not null, default: 0]
+  maximum_selections int
+  display_order int [not null, default: 0]
+  active boolean [not null, default: true]
+  version bigint [not null, default: 0]
+}
+
+Table catalog.customization_options {
+  option_id uuid [pk]
+  group_id uuid [not null, ref: > catalog.customization_groups.group_id]
+  option_code varchar(50) [not null]
+  option_name varchar(100) [not null]
+  additional_price numeric(14,4) [not null, default: 0]
+  display_order int [not null, default: 0]
+  active boolean [not null, default: true]
+  version bigint [not null, default: 0]
+  indexes { (group_id, option_code) [unique] }
+}
+
+Table catalog.product_customization_groups {
+  product_id uuid [not null, ref: > catalog.products.product_id]
+  group_id uuid [not null, ref: > catalog.customization_groups.group_id]
+  required boolean [not null, default: false]
+  display_order int [not null, default: 0]
+  indexes { (product_id, group_id) [pk] }
+}
+
+Table recipe.recipe_versions {
+  recipe_version_id uuid [pk]
+  product_id uuid [not null, ref: > catalog.products.product_id]
+  version_number int [not null]
+  status recipe_status [not null]
+  effective_from timestamptz [not null]
+  effective_to timestamptz
+  created_by_user_id uuid [not null, ref: > identity.users.user_id]
+  created_at timestamptz [not null]
+  version bigint [not null, default: 0]
+  indexes { (product_id, version_number) [unique] }
+}
+
+Table inventory.units_of_measure {
+  unit_id uuid [pk]
+  unit_code varchar(20) [not null, unique]
+  unit_name varchar(60) [not null]
+  unit_type varchar(20) [not null]
+  decimal_scale smallint [not null, default: 4]
+  active boolean [not null, default: true]
+}
+
+Table inventory.ingredients {
+  ingredient_id uuid [pk]
+  ingredient_code varchar(50) [not null, unique]
+  ingredient_name varchar(150) [not null]
+  unit_id uuid [not null, ref: > inventory.units_of_measure.unit_id]
+  standard_cost numeric(14,4) [not null, default: 0]
+  active boolean [not null, default: true]
+  created_at timestamptz [not null]
+  updated_at timestamptz [not null]
+  version bigint [not null, default: 0]
+}
+
+Table recipe.recipe_version_lines {
+  recipe_version_line_id uuid [pk]
+  recipe_version_id uuid [not null, ref: > recipe.recipe_versions.recipe_version_id]
+  ingredient_id uuid [not null, ref: > inventory.ingredients.ingredient_id]
+  quantity_required numeric(16,4) [not null]
+  wastage_percent numeric(9,6) [not null, default: 0]
+  created_at timestamptz [not null]
+  indexes { (recipe_version_id, ingredient_id) [unique] }
+}
+
+Table cart.carts {
+  cart_id uuid [pk]
+  customer_id uuid [ref: > customer.customer_profiles.customer_id]
+  created_by_user_id uuid [ref: > identity.users.user_id]
+  store_id uuid [not null, ref: > organization.stores.store_id]
+  source order_source [not null]
+  status varchar(20) [not null]
+  fulfillment_type fulfillment_type
+  currency_code char(3) [not null]
+  expires_at timestamptz [not null]
+  created_at timestamptz [not null]
+  updated_at timestamptz [not null]
+  version bigint [not null, default: 0]
+  indexes { (status, expires_at) }
+}
+
+Table cart.cart_items {
+  cart_item_id uuid [pk]
+  cart_id uuid [not null, ref: > cart.carts.cart_id]
+  product_id uuid [not null, ref: > catalog.products.product_id]
+  product_name_snapshot varchar(150) [not null]
+  quantity int [not null]
+  unit_base_price_snapshot numeric(14,4) [not null]
+  note varchar(500)
+  version bigint [not null, default: 0]
+  indexes { cart_id }
+}
+
+Table cart.cart_item_customizations {
+  cart_item_customization_id uuid [pk]
+  cart_item_id uuid [not null, ref: > cart.cart_items.cart_item_id]
+  group_id uuid [ref: > catalog.customization_groups.group_id]
+  option_id uuid [ref: > catalog.customization_options.option_id]
+  group_name_snapshot varchar(100) [not null]
+  option_name_snapshot varchar(100) [not null]
+  additional_price_snapshot numeric(14,4) [not null, default: 0]
+  quantity int [not null, default: 1]
+  indexes { cart_item_id }
+}
+
+Table ordering.orders {
+  order_id uuid [pk]
+  order_number varchar(50) [not null, unique]
+  store_id uuid [not null, ref: > organization.stores.store_id]
+  customer_id uuid [ref: > customer.customer_profiles.customer_id]
+  cart_id uuid [unique, ref: > cart.carts.cart_id]
+  source order_source [not null]
+  fulfillment_type fulfillment_type [not null]
+  status order_status [not null]
+  payment_status payment_status [not null, default: 'PENDING']
+  currency_code char(3) [not null]
+  subtotal numeric(14,4) [not null]
+  discount_amount numeric(14,4) [not null, default: 0]
+  tax_amount numeric(14,4) [not null, default: 0]
+  delivery_fee numeric(14,4) [not null, default: 0]
+  rounding_amount numeric(14,4) [not null, default: 0]
+  total_amount numeric(14,4) [not null]
+  total_quantity int [not null]
+  cashier_user_id uuid [ref: > identity.users.user_id]
+  ordered_at timestamptz [not null]
+  ready_at timestamptz
+  completed_at timestamptz
+  cancelled_at timestamptz
+  version bigint [not null, default: 0]
+  indexes {
+    (customer_id, ordered_at)
+    (store_id, status, ordered_at)
+  }
+}
+
+Table ordering.order_items {
+  order_item_id uuid [pk]
+  order_id uuid [not null, ref: > ordering.orders.order_id]
+  product_id uuid [ref: > catalog.products.product_id]
+  recipe_version_id uuid [ref: > recipe.recipe_versions.recipe_version_id]
+  station_id uuid [ref: > production.production_stations.station_id]
+  product_code_snapshot varchar(50) [not null]
+  product_name_snapshot varchar(150) [not null]
+  quantity int [not null]
+  unit_base_price numeric(14,4) [not null]
+  unit_customization_price numeric(14,4) [not null, default: 0]
+  line_discount_amount numeric(14,4) [not null, default: 0]
+  line_tax_amount numeric(14,4) [not null, default: 0]
+  line_total numeric(14,4) [not null]
+  note varchar(500)
+  indexes { order_id }
+}
+
+Table ordering.order_item_customizations {
+  order_item_customization_id uuid [pk]
+  order_item_id uuid [not null, ref: > ordering.order_items.order_item_id]
+  group_id uuid
+  option_id uuid
+  group_name_snapshot varchar(100) [not null]
+  option_name_snapshot varchar(100) [not null]
+  additional_price numeric(14,4) [not null, default: 0]
+  quantity int [not null, default: 1]
+  indexes { order_item_id }
+}
+
+Table ordering.order_status_history {
+  history_id bigint [pk, increment]
+  order_id uuid [not null, ref: > ordering.orders.order_id]
+  from_status order_status
+  to_status order_status [not null]
+  changed_by_user_id uuid [ref: > identity.users.user_id]
+  reason text
+  request_id uuid
+  correlation_id uuid
+  changed_at timestamptz [not null]
+  indexes { (order_id, changed_at, history_id) }
+}
+
+Table inventory.inventory_balances {
+  store_id uuid [not null, ref: > organization.stores.store_id]
+  ingredient_id uuid [not null, ref: > inventory.ingredients.ingredient_id]
+  current_stock numeric(16,4) [not null, default: 0]
+  reserved_stock numeric(16,4) [not null, default: 0]
+  minimum_stock numeric(16,4) [not null, default: 0]
+  average_unit_cost numeric(14,4) [not null, default: 0]
+  updated_at timestamptz [not null]
+  version bigint [not null, default: 0]
+  indexes { (store_id, ingredient_id) [pk] }
+}
+
+Table inventory.inventory_reservations {
+  reservation_id uuid [pk]
+  store_id uuid [not null, ref: > organization.stores.store_id]
+  order_id uuid [not null, unique, ref: > ordering.orders.order_id]
+  idempotency_key uuid [not null]
+  status reservation_status [not null]
+  expires_at timestamptz [not null]
+  consumed_at timestamptz
+  released_at timestamptz
+  expired_at timestamptz
+  created_at timestamptz [not null]
+  updated_at timestamptz [not null]
+  version bigint [not null, default: 0]
+  indexes { (status, expires_at) }
+}
+
+Table inventory.inventory_reservation_lines {
+  reservation_line_id uuid [pk]
+  reservation_id uuid [not null, ref: > inventory.inventory_reservations.reservation_id]
+  ingredient_id uuid [not null, ref: > inventory.ingredients.ingredient_id]
+  quantity_reserved numeric(16,4) [not null]
+  quantity_consumed numeric(16,4) [not null, default: 0]
+  created_at timestamptz [not null]
+  indexes { (reservation_id, ingredient_id) [unique] }
+}
+
+Table inventory.stock_transactions {
+  stock_transaction_id uuid [pk]
+  transaction_number varchar(60) [not null, unique]
+  store_id uuid [not null, ref: > organization.stores.store_id]
+  transaction_type stock_transaction_type [not null]
+  reference_type varchar(40)
+  reference_id uuid
+  notes text
+  recorded_by_user_id uuid [ref: > identity.users.user_id]
+  occurred_at timestamptz [not null]
+  created_at timestamptz [not null]
+  indexes { (store_id, occurred_at) (reference_type, reference_id) }
+}
+
+Table inventory.stock_transaction_lines {
+  stock_transaction_line_id uuid [pk]
+  stock_transaction_id uuid [not null, ref: > inventory.stock_transactions.stock_transaction_id]
+  ingredient_id uuid [not null, ref: > inventory.ingredients.ingredient_id]
+  quantity_delta numeric(16,4) [not null]
+  unit_cost numeric(14,4)
+  balance_before numeric(16,4) [not null]
+  balance_after numeric(16,4) [not null]
+  reason text
+  created_at timestamptz [not null]
+  indexes { stock_transaction_id ingredient_id }
+}
+
+Table production.production_tickets {
+  ticket_id uuid [pk]
+  order_id uuid [not null, ref: > ordering.orders.order_id]
+  store_id uuid [not null, ref: > organization.stores.store_id]
+  station_id uuid [not null, ref: > production.production_stations.station_id]
+  ticket_number varchar(60) [not null, unique]
+  status production_status [not null]
+  priority varchar(20) [not null, default: 'NORMAL']
+  queued_at timestamptz [not null]
+  started_at timestamptz
+  ready_at timestamptz
+  completed_at timestamptz
+  version bigint [not null, default: 0]
+  indexes {
+    (order_id, station_id) [unique]
+    (store_id, station_id, status, queued_at)
+  }
+}
+
+Table production.production_ticket_items {
+  ticket_item_id uuid [pk]
+  ticket_id uuid [not null, ref: > production.production_tickets.ticket_id]
+  order_item_id uuid [not null, ref: > ordering.order_items.order_item_id]
+  quantity int [not null]
+  status production_status [not null]
+  assigned_user_id uuid [ref: > identity.users.user_id]
+  started_at timestamptz
+  ready_at timestamptz
+  version bigint [not null, default: 0]
+  indexes { (ticket_id, order_item_id) [unique] }
+}
+
+Table payment.payment_methods {
+  payment_method_id uuid [pk]
+  method_code varchar(30) [not null, unique]
+  method_name varchar(100) [not null]
+  method_type payment_method_type [not null]
+  active boolean [not null, default: true]
+  display_order int [not null, default: 0]
+  version bigint [not null, default: 0]
+}
+
+Table payment.payment_method_store_configs {
+  store_id uuid [not null, ref: > organization.stores.store_id]
+  payment_method_id uuid [not null, ref: > payment.payment_methods.payment_method_id]
+  enabled boolean [not null, default: true]
+  currency_code char(3) [not null]
+  configuration_metadata jsonb
+  version bigint [not null, default: 0]
+  indexes { (store_id, payment_method_id) [pk] }
+}
+
+Table payment.payments {
+  payment_id uuid [pk]
+  payment_reference varchar(80) [not null, unique]
+  order_id uuid [not null, ref: > ordering.orders.order_id]
+  store_id uuid [not null, ref: > organization.stores.store_id]
+  payment_method_id uuid [not null, ref: > payment.payment_methods.payment_method_id]
+  status payment_status [not null]
+  settlement_currency char(3) [not null]
+  amount numeric(14,4) [not null]
+  tender_currency char(3)
+  exchange_rate numeric(20,10)
+  amount_received numeric(14,4)
+  change_amount numeric(14,4)
+  provider_name varchar(80)
+  provider_reference varchar(200)
+  expires_at timestamptz
+  paid_at timestamptz
+  received_by_user_id uuid [ref: > identity.users.user_id]
+  created_at timestamptz [not null]
+  updated_at timestamptz [not null]
+  version bigint [not null, default: 0]
+  indexes { (order_id, created_at) (status, expires_at) (provider_name, provider_reference) }
+}
+
+Table payment.receipts {
+  receipt_id uuid [pk]
+  receipt_number varchar(60) [not null, unique]
+  payment_id uuid [not null, unique, ref: > payment.payments.payment_id]
+  order_id uuid [not null, ref: > ordering.orders.order_id]
+  store_id uuid [not null, ref: > organization.stores.store_id]
+  status varchar(20) [not null]
+  receipt_snapshot jsonb [not null]
+  object_key text
+  issued_at timestamptz
+  created_at timestamptz [not null]
+  version bigint [not null, default: 0]
+}
+
+Table promotion.promotions {
+  promotion_id uuid [pk]
+  promotion_code varchar(50) [unique]
+  promotion_name varchar(150) [not null]
+  description text
+  discount_type discount_type [not null]
+  discount_value numeric(14,4) [not null]
+  minimum_order_amount numeric(14,4) [not null, default: 0]
+  maximum_discount_amount numeric(14,4)
+  currency_code char(3)
+  starts_at timestamptz [not null]
+  ends_at timestamptz [not null]
+  status promotion_status [not null]
+  usage_limit int
+  per_customer_limit int
+  stackable boolean [not null, default: false]
+  automatic boolean [not null, default: false]
+  priority int [not null, default: 0]
+  version bigint [not null, default: 0]
+}
+
+Table promotion.promotion_products {
+  promotion_id uuid [not null, ref: > promotion.promotions.promotion_id]
+  product_id uuid [not null, ref: > catalog.products.product_id]
+  indexes { (promotion_id, product_id) [pk] }
+}
+
+Table promotion.promotion_categories {
+  promotion_id uuid [not null, ref: > promotion.promotions.promotion_id]
+  category_id uuid [not null, ref: > catalog.product_categories.category_id]
+  indexes { (promotion_id, category_id) [pk] }
+}
+
+Table promotion.promotion_stores {
+  promotion_id uuid [not null, ref: > promotion.promotions.promotion_id]
+  store_id uuid [not null, ref: > organization.stores.store_id]
+  indexes { (promotion_id, store_id) [pk] }
+}
+
+Table promotion.promotion_redemptions {
+  redemption_id uuid [pk]
+  promotion_id uuid [not null, ref: > promotion.promotions.promotion_id]
+  customer_id uuid [ref: > customer.customer_profiles.customer_id]
+  order_id uuid [not null, ref: > ordering.orders.order_id]
+  store_id uuid [not null, ref: > organization.stores.store_id]
+  status redemption_status [not null]
+  discount_amount numeric(14,4) [not null]
+  currency_code char(3) [not null]
+  reserved_at timestamptz [not null]
+  expires_at timestamptz
+  redeemed_at timestamptz
+  released_at timestamptz
+  version bigint [not null, default: 0]
+  indexes { (promotion_id, order_id) [unique] (status, expires_at) }
+}
+
+Table loyalty.loyalty_accounts {
+  loyalty_account_id uuid [pk]
+  customer_id uuid [not null, unique, ref: > customer.customer_profiles.customer_id]
+  available_points bigint [not null, default: 0]
+  reserved_points bigint [not null, default: 0]
+  lifetime_earned_points bigint [not null, default: 0]
+  lifetime_redeemed_points bigint [not null, default: 0]
+  status varchar(20) [not null, default: 'ACTIVE']
+  joined_at timestamptz [not null]
+  updated_at timestamptz [not null]
+  version bigint [not null, default: 0]
+}
+
+Table loyalty.loyalty_transactions {
+  loyalty_transaction_id uuid [pk]
+  loyalty_account_id uuid [not null, ref: > loyalty.loyalty_accounts.loyalty_account_id]
+  transaction_number varchar(60) [not null, unique]
+  transaction_type varchar(30) [not null]
+  points_delta bigint [not null]
+  balance_before bigint [not null]
+  balance_after bigint [not null]
+  order_id uuid [ref: > ordering.orders.order_id]
+  reason text
+  occurred_at timestamptz [not null]
+  created_at timestamptz [not null]
+  indexes { (loyalty_account_id, occurred_at) (order_id, transaction_type) }
+}
+
+Table notification.notifications {
+  notification_id uuid [pk]
+  source_event_id uuid
+  notification_type varchar(60) [not null]
+  category varchar(40) [not null]
+  message_key varchar(120) [not null]
+  template_arguments jsonb [not null]
+  action_url text
+  related_entity_type varchar(50)
+  related_entity_id uuid
+  priority varchar(20) [not null, default: 'NORMAL']
+  created_at timestamptz [not null]
+  expires_at timestamptz
+  version bigint [not null, default: 0]
+  indexes { (source_event_id, notification_type) [unique] }
+}
+
+Table notification.notification_recipients {
+  notification_recipient_id uuid [pk]
+  notification_id uuid [not null, ref: > notification.notifications.notification_id]
+  user_id uuid [not null, ref: > identity.users.user_id]
+  locale varchar(10) [not null]
+  read_at timestamptz
+  archived_at timestamptz
+  created_at timestamptz [not null]
+  version bigint [not null, default: 0]
+  indexes { (notification_id, user_id) [unique] (user_id, created_at) }
+}
+
+Table notification.notification_deliveries {
+  notification_delivery_id uuid [pk]
+  notification_recipient_id uuid [not null, ref: > notification.notification_recipients.notification_recipient_id]
+  channel delivery_channel [not null]
+  status delivery_status [not null]
+  provider_name varchar(60)
+  provider_reference varchar(200)
+  attempt_count int [not null, default: 0]
+  next_attempt_at timestamptz
+  delivered_at timestamptz
+  last_error_code varchar(100)
+  created_at timestamptz [not null]
+  updated_at timestamptz [not null]
+  version bigint [not null, default: 0]
+  indexes { (notification_recipient_id, channel) [unique] (status, next_attempt_at, created_at) }
+}
+
+Table audit.audit_logs {
+  audit_log_id bigint [pk, increment]
+  occurred_at timestamptz [not null]
+  actor_type varchar(20) [not null]
+  actor_user_id uuid [ref: > identity.users.user_id]
+  store_id uuid [ref: > organization.stores.store_id]
+  action varchar(100) [not null]
+  category varchar(60) [not null]
+  aggregate_type varchar(80)
+  aggregate_id uuid
+  outcome varchar(30) [not null]
+  reason text
+  old_values jsonb
+  new_values jsonb
+  request_id uuid
+  correlation_id uuid
+  source varchar(40) [not null]
+  created_at timestamptz [not null]
+  indexes { (store_id, occurred_at) (aggregate_type, aggregate_id, occurred_at) correlation_id }
+}
+
+Table integration.api_idempotency_records {
+  idempotency_record_id uuid [pk]
+  scope varchar(80) [not null]
+  actor_type varchar(20) [not null]
+  actor_id uuid [not null]
+  store_id uuid
+  idempotency_key uuid [not null]
+  request_hash char(64) [not null]
+  status idempotency_status [not null]
+  resource_type varchar(60)
+  resource_id uuid
+  response_status int
+  response_body jsonb
+  error_code varchar(100)
+  processing_started_at timestamptz
+  created_at timestamptz [not null]
+  updated_at timestamptz [not null]
+  expires_at timestamptz [not null]
+  version bigint [not null, default: 0]
+  indexes {
+    (scope, actor_type, actor_id, idempotency_key) [unique]
+    (status, expires_at)
+    (resource_type, resource_id)
+  }
+}
+
+Table integration.outbox_events {
+  outbox_event_id uuid [pk]
+  event_id uuid [not null, unique]
+  event_type varchar(100) [not null]
+  event_version int [not null]
+  aggregate_type varchar(80) [not null]
+  aggregate_id uuid [not null]
+  store_id uuid
+  correlation_id uuid
+  causation_id uuid
+  routing_key varchar(150) [not null]
+  payload jsonb [not null]
+  status outbox_status [not null]
+  occurred_at timestamptz [not null]
+  available_at timestamptz [not null]
+  published_at timestamptz
+  attempt_count int [not null, default: 0]
+  claimed_by varchar(120)
+  claimed_at timestamptz
+  last_error_code varchar(100)
+  created_at timestamptz [not null]
+  updated_at timestamptz [not null]
+  version bigint [not null, default: 0]
+  indexes {
+    (status, available_at, created_at)
+    (status, claimed_at)
+    (aggregate_type, aggregate_id, occurred_at)
+  }
+}
+
+Table integration.consumer_inbox {
+  inbox_id uuid [pk]
+  consumer_name varchar(120) [not null]
+  event_id uuid [not null]
+  event_type varchar(100) [not null]
+  event_version int [not null]
+  status inbox_status [not null]
+  received_at timestamptz [not null]
+  processing_started_at timestamptz
+  processed_at timestamptz
+  attempt_count int [not null, default: 0]
+  last_error_code varchar(100)
+  created_at timestamptz [not null]
+  updated_at timestamptz [not null]
+  version bigint [not null, default: 0]
+  indexes { (consumer_name, event_id) [unique] (status, processing_started_at) }
+}
