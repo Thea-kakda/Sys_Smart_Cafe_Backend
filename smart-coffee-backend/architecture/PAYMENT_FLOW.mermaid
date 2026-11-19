@@ -1,0 +1,73 @@
+sequenceDiagram
+    autonumber
+    actor Client
+    participant API as Payment API
+    participant Auth as Authorization
+    participant Payment as Payment Module
+    participant DB as PostgreSQL
+    participant KHQR as KHQR Provider
+    participant Callback as Callback Endpoint
+    participant Outbox as Outbox Relay
+    participant MQ as RabbitMQ
+    participant Order as Ordering Consumer
+
+    Client->>API: POST /api/v1/payments + Idempotency-Key
+    API->>Auth: Verify actor and payment permission
+    Auth-->>API: Authorized
+    API->>Payment: Create payment attempt for order balance
+    Payment->>DB: Validate payment idempotency and outstanding amount
+    Payment->>DB: Insert payment and PENDING attempt
+    Payment->>DB: Insert PaymentInitiated.v1 into outbox
+    DB-->>Payment: Commit
+
+    alt CASH payment
+        Payment->>Payment: Verify authorized cashier and tender
+        Payment->>DB: Mark attempt SUCCEEDED and calculate change
+        Payment->>DB: Insert PaymentSucceeded.v1 into outbox
+        Payment-->>Client: Payment confirmed
+    else KHQR payment
+        Payment->>KHQR: Idempotent create-payment request
+        alt Provider request accepted
+            KHQR-->>Payment: Provider reference and QR payload
+            Payment->>DB: Save provider reference
+            Payment-->>Client: 202 Payment pending with QR data
+        else Provider timeout or unknown result
+            KHQR--xPayment: Timeout
+            Payment->>DB: Keep attempt PENDING or UNKNOWN for reconciliation
+            Payment-->>Client: 202 Verification pending
+        end
+    end
+
+    KHQR->>Callback: Signed asynchronous callback
+    Callback->>Callback: Verify signature, timestamp, source and replay key
+    alt Invalid callback
+        Callback-->>KHQR: 401 or provider-agreed rejection
+    else Valid callback
+        Callback->>DB: Insert unique provider event ID
+        alt Duplicate provider event
+            DB-->>Callback: Already processed
+            Callback-->>KHQR: 200 Idempotent acknowledgement
+        else New success event
+            Callback->>Payment: Lock and transition payment attempt
+            Payment->>DB: Mark SUCCEEDED and persist external evidence
+            Payment->>DB: Insert PaymentSucceeded.v1 into outbox
+            DB-->>Callback: Commit
+            Callback-->>KHQR: 200 Accepted
+        end
+    end
+
+    Outbox->>DB: Poll unpublished events
+    Outbox->>MQ: Publish PaymentSucceeded.v1
+    MQ->>Order: Deliver at least once
+    Order->>DB: Claim event in consumer inbox
+    alt Event already processed
+        Order-->>MQ: Acknowledge duplicate
+    else First delivery
+        Order->>DB: Transition AWAITING_PAYMENT to CONFIRMED
+        Order->>DB: Insert OrderConfirmed.v1 into outbox
+        Order-->>MQ: Acknowledge after commit
+    end
+
+    Note over Client,Payment: Frontend success is never accepted as payment evidence
+    Note over Payment,KHQR: Reconciliation checks provider state before creating another charge
+    Note over Payment,Order: Slice 2E: settlement is the one SALE_CONSUMPTION point. If a payment commits but the process dies before consuming, the multi-node reservation expiry worker runs PaidOrderRecoveryService.recover and consumes the still-ACTIVE hold once (guarded by the nine recovery conditions) — it never releases a settled order. Provider-payment reconciliation (this diagram) and inventory reservation reconciliation (INVENTORY_FLOW) are separate concerns.

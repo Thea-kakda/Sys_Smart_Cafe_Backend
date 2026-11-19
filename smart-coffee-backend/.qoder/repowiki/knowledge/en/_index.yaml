@@ -1,0 +1,56 @@
+# 知识卡导出索引文件
+schema_version: 1
+locale: en-US
+branch: develop
+nodes_managed: true
+exported_at: "2026-09-25T10:32:55Z"
+modules:
+    "":
+        dir_name: Smart Coffee Backend — Identity & Commerce Monolith
+        title: Smart Coffee Backend — Identity & Commerce Monolith
+        scope:
+            - README_STEP*.md
+            - AUTHENTICATION_SERVICE_PATCH.md
+            - BUSINESS_AUDIT_PATCH.md
+            - CART_DOMAIN_PATCH.md
+            - CHECKOUT_PROMOTION_LOYALTY_PATCH.md
+            - ORDER_DOMAIN_PATCH.md
+            - ORDER_PRODUCTION_PATCH.md
+            - OUTBOX_ENTITY_PATCH.md
+            - PAYMENT_INTEGRATION_PATCH.md
+            - PAYMENT_LOYALTY_PATCH.md
+            - RABBITMQ_NOTIFICATION_PATCH.md
+            - RECEIPT_ENTITY_PATCH.md
+            - compose.yaml
+            - Dockerfile
+            - pom.xml
+            - mvnw.cmd
+            - .gitignore
+            - .gitattributes
+            - package-lock.json
+            - .env.example
+            - ArchitectureDiagram.svg
+            - Download ARCHITECTURE_AUDIT.md
+            - README_STEP10.md
+            - README_STEP11.md
+            - README_STEP12.md
+            - README_STEP2.md
+            - README_STEP3.md
+            - README_STEP4.md
+            - README_STEP5.md
+            - README_STEP6.md
+            - README_STEP7.md
+            - README_STEP8.md
+            - README_STEP9.md
+            - client_backend_architecture.png
+            - identity_access_commerce.png
+            - indentify.md
+            - microservices_architecture.svg
+            - microservices_architecture1.svg
+            - mvnw
+            - sys_ach.mermaid
+            - this my floder archeture (identity-.txt
+        source_files: []
+        children: []
+        depends_on: []
+        related_to: []

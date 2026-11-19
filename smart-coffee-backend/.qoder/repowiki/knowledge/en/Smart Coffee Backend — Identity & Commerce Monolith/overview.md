@@ -1,0 +1,1 @@
+Spring Boot monolithic backend for Smart Coffee & Bakery that provides identity, authentication, RBAC, and commerce domains (catalog, cart, orders, payments, production, promotions, loyalty) backed by PostgreSQL, Redis, RabbitMQ, and MinIO.

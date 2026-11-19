@@ -1,0 +1,116 @@
+flowchart TB
+    subgraph Clients[Client Applications]
+        Mobile[Customer Mobile App]
+        Web[Customer Web App]
+        POS[Staff POS]
+        Admin[Admin Dashboard]
+        KDS[Kitchen Display]
+    end
+
+    subgraph Edge[Edge Trust Boundary]
+        Proxy[HTTPS Reverse Proxy]
+        Gateway[API Gateway - optional until multiple deployables exist]
+    end
+
+    Mobile --> Proxy
+    Web --> Proxy
+    POS --> Proxy
+    Admin --> Proxy
+    KDS --> Proxy
+    Proxy --> Gateway
+
+    subgraph Backend[Spring Boot 4 Modular Monolith]
+        API[REST and WebSocket Adapters]
+        IAM[Identity and RBAC]
+        Store[Store]
+        Catalog[Catalog and Customization]
+        Customer[Customer and Loyalty]
+        Cart[Cart]
+        Order[Ordering]
+        Payment[Payment]
+        Promotion[Promotion]
+        Recipe[Recipe]
+        Inventory[Inventory and Procurement]
+        Expense[Expense]
+        Kitchen[Kitchen Workflow]
+        Notification[Notification]
+        Analytics[Analytics Projection]
+        Audit[Audit]
+        Settings[Settings]
+        Outbox[Transactional Outbox]
+
+        API --> IAM
+        API --> Store
+        API --> Catalog
+        API --> Customer
+        API --> Cart
+        API --> Order
+        API --> Payment
+        API --> Inventory
+        API --> Expense
+        API --> Analytics
+
+        Cart --> Catalog
+        Order --> Store
+        Order --> Catalog
+        Order --> Promotion
+        Order --> Inventory
+        Order --> Payment
+        Order --> Kitchen
+        Order --> Customer
+        Recipe --> Inventory
+        Payment --> Order
+
+        Order --> Outbox
+        Payment --> Outbox
+        Inventory --> Outbox
+        IAM --> Outbox
+    end
+
+    Gateway --> API
+
+    subgraph Data[Platform Data and Infrastructure]
+        PostgreSQL[(PostgreSQL 16+ - system of record)]
+        Redis[(Redis - cache and ephemeral state)]
+        RabbitMQ[(RabbitMQ - durable asynchronous delivery)]
+        Storage[(MinIO or S3-compatible object storage)]
+        Observability[Actuator, OpenTelemetry, metrics and logs]
+    end
+
+    Backend --> PostgreSQL
+    API -. bounded cache .-> Redis
+    Outbox --> RabbitMQ
+    RabbitMQ --> Notification
+    RabbitMQ --> Analytics
+    Backend --> Storage
+    Backend -. telemetry .-> Observability
+
+    subgraph External[External Providers]
+        KHQR[KHQR or Bakong Provider]
+        Push[Push Provider]
+        Email[Email Provider]
+    end
+
+    Payment -->|Idempotent server request| KHQR
+    KHQR -->|Signed callback| Gateway
+    Notification --> Push
+    Notification --> Email
+
+    subgraph Rules[Mandatory Architecture Rules]
+        R1[One table has one write owner]
+        R2[No client-authoritative pricing]
+        R3[No client-authoritative payment success]
+        R4[No Redis-only financial correctness]
+        R5[Outbox producer and idempotent consumer]
+        R6[No distributed transaction or 2PC]
+    end
+
+    classDef service fill:#EAF8EE,stroke:#16803C,color:#102018;
+    classDef data fill:#F3E8FF,stroke:#7E22CE,color:#20102A;
+    classDef external fill:#FFF1F2,stroke:#BE123C,color:#2A1014;
+    classDef rule fill:#FFFBEA,stroke:#A16207,color:#2A2010;
+
+    class API,IAM,Store,Catalog,Customer,Cart,Order,Payment,Promotion,Recipe,Inventory,Expense,Kitchen,Notification,Analytics,Audit,Settings,Outbox service;
+    class PostgreSQL,Redis,RabbitMQ,Storage,Observability data;
+    class KHQR,Push,Email external;
+    class R1,R2,R3,R4,R5,R6 rule;

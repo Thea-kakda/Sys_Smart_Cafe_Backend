@@ -1,0 +1,2 @@
+# Checkout integration patch
+Before finalizing Order totals, evaluate and reserve Promotion usage and optional Loyalty points. Store the authoritative discount in Order and Order Items. If checkout rolls back, reservations roll back automatically. Payment expiration must call `PromotionRedemptionService.releaseForOrder(orderId)` and release reserved Loyalty points. Payment success must call `redeemForOrder(orderId)` and confirm Loyalty redemption.

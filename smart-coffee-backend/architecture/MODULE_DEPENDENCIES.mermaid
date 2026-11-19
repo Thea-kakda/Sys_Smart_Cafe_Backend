@@ -1,0 +1,92 @@
+flowchart LR
+    subgraph Access[Identity and Access Boundary]
+        Auth[Auth]
+        User[User]
+        RBAC[RBAC]
+        Auth --> User
+        RBAC --> User
+    end
+
+    subgraph Commerce[Commerce Boundary]
+        Store[Store]
+        Catalog[Catalog]
+        Customization[Customization]
+        Customer[Customer]
+        Loyalty[Loyalty]
+        Cart[Cart]
+        Promotion[Promotion]
+        Ordering[Ordering]
+        Payment[Payment]
+        Kitchen[Kitchen]
+
+        Catalog --> Store
+        Customization --> Catalog
+        Cart --> Customer
+        Cart --> Catalog
+        Cart --> Customization
+        Ordering --> Cart
+        Ordering --> Store
+        Ordering --> Catalog
+        Ordering --> Customization
+        Ordering --> Promotion
+        Ordering --> Loyalty
+        Payment --> Ordering
+        Kitchen --> Ordering
+    end
+
+    subgraph Supply[Supply and Cost Boundary]
+        Recipe[Recipe]
+        Inventory[Inventory]
+        Procurement[Procurement]
+        Expense[Expense]
+
+        Recipe --> Catalog
+        Inventory --> Recipe
+        Procurement --> Inventory
+    end
+
+    subgraph Supporting[Supporting Boundary]
+        Notification[Notification]
+        Analytics[Analytics]
+        Audit[Audit]
+        Setting[Setting]
+        Integration[Outbox and Inbox]
+    end
+
+    Ordering --> Inventory
+    Ordering --> Payment
+    Ordering -. event .-> Notification
+    Payment -. event .-> Notification
+    Ordering -. event .-> Analytics
+    Payment -. event .-> Analytics
+    Inventory -. event .-> Analytics
+    Expense -. event .-> Analytics
+
+    Auth -. audit event .-> Audit
+    Ordering -. audit event .-> Audit
+    Payment -. audit event .-> Audit
+    Inventory -. audit event .-> Audit
+    RBAC -. audit event .-> Audit
+
+    Auth --> Integration
+    Ordering --> Integration
+    Payment --> Integration
+    Inventory --> Integration
+    Notification --> Integration
+    Analytics --> Integration
+
+    Setting -. owned settings only .-> Store
+    Setting -. owned settings only .-> Payment
+    Setting -. owned settings only .-> Notification
+
+    Note1[Solid arrow: synchronous application dependency]
+    Note2[Dashed arrow: event-driven dependency]
+    Note3[No module may inject another module's JPA repository]
+
+    classDef core fill:#EAF8EE,stroke:#16803C,color:#102018;
+    classDef support fill:#E8F2FF,stroke:#2563EB,color:#102040;
+    classDef note fill:#FFFBEA,stroke:#A16207,color:#302510;
+
+    class Auth,User,RBAC,Store,Catalog,Customization,Customer,Loyalty,Cart,Promotion,Ordering,Payment,Kitchen,Recipe,Inventory,Procurement,Expense core;
+    class Notification,Analytics,Audit,Setting,Integration support;
+    class Note1,Note2,Note3 note;

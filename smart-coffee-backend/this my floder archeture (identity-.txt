@@ -1,0 +1,154 @@
+this my floder archeture (identity-service/
+├── .mvn/wrapper/
+├── src/
+│   ├── main/
+│   │   ├── java/
+│   │   │   └── com/
+│   │   │       └── smartcoffee/
+│   │   │           └── identity/ (or backend)
+│   │   │               ├── IdentityServiceApplication.java   # Main entry point
+│   │   │               │
+│   │   │               ├── config/                           # ⬅️ Mapped from NestJS "config/"
+│   │   │               │   ├── AppConfig.java               # General app props
+│   │   │               │   ├── SecurityConfig.java          # Spring Security (JWT, RBAC)
+│   │   │               │   ├── DatabaseConfig.java          # DataSource, JPA, Transactions
+│   │   │               │   ├── RedisConfig.java             # Cache & Session config
+│   │   │               │   ├── StorageConfig.java           # S3/MinIO beans
+│   │   │               │   ├── WebSocketConfig.java         # STOMP/WebSocket broker
+│   │   │               │   ├── AsyncConfig.java             # Thread pools for @Async jobs
+│   │   │               │   └── ValidationConfig.java        # Global Validator setup
+│   │   │               │
+│   │   │               ├── common/                           # ⬅️ Mapped from NestJS "common/"
+│   │   │               │   ├── annotation/                  # Custom Java Annotations
+│   │   │               │   │   ├── CurrentUser.java
+│   │   │               │   │   ├── CurrentStore.java
+│   │   │               │   │   ├── Public.java              # Skip JWT filter
+│   │   │               │   │   ├── RequirePermission.java
+│   │   │               │   │   └── IdempotencyKey.java
+│   │   │               │   ├── constant/                    # Constants & Enums
+│   │   │               │   │   ├── AppConstants.java
+│   │   │               │   │   ├── ErrorCodes.java
+│   │   │               │   │   └── CacheKeys.java
+│   │   │               │   ├── dto/                         # Shared Base DTOs
+│   │   │               │   │   ├── PageRequestDto.java
+│   │   │               │   │   ├── DateRangeDto.java
+│   │   │               │   │   ├── ApiResponse.java         # Standard wrapper
+│   │   │               │   │   └── PaginatedResponse.java
+│   │   │               │   ├── enums/                       # Shared Enums (maps to NestJS enums)
+│   │   │               │   │   ├── UserStatus.java
+│   │   │               │   │   ├── OrderStatus.java
+│   │   │               │   │   ├── PaymentStatus.java
+│   │   │               │   │   └── InventoryTransactionType.java
+│   │   │               │   ├── exception/                   # Custom Exceptions + Handler
+│   │   │               │   │   ├── BusinessException.java
+│   │   │               │   │   ├── ResourceNotFoundException.java
+│   │   │               │   │   ├── InsufficientStockException.java
+│   │   │               │   │   └── GlobalExceptionHandler.java # @ControllerAdvice
+│   │   │               │   ├── filter/                      # Servlet Filters
+│   │   │               │   │   ├── RequestIdFilter.java
+│   │   │               │   │   └── SecurityHeaderFilter.java
+│   │   │               │   ├── interceptor/                 # HandlerInterceptors
+│   │   │               │   │   ├── ResponseInterceptor.java # Wraps responses
+│   │   │               │   │   ├── LoggingInterceptor.java
+│   │   │               │   │   └── IdempotencyInterceptor.java
+│   │   │               │   ├── security/                    # JWT & Guards (mapped from NestJS guards)
+│   │   │               │   │   ├── JwtAuthenticationFilter.java
+│   │   │               │   │   ├── JwtTokenProvider.java
+│   │   │               │   │   ├── RefreshTokenFilter.java
+│   │   │               │   │   ├── StoreAccessFilter.java
+│   │   │               │   │   └── PermissionEvaluator.java # @PreAuthorize logic
+│   │   │               │   ├── resolver/                    # ArgumentResolvers
+│   │   │               │   │   ├── CurrentUserResolver.java
+│   │   │               │   │   └── CurrentStoreResolver.java
+│   │   │               │   └── util/                        # Utility classes
+│   │   │               │       ├── MoneyUtils.java
+│   │   │               │       ├── DateTimeUtils.java
+│   │   │               │       ├── PaginationUtils.java
+│   │   │               │       └── NumberGeneratorUtils.java
+│   │   │               │
+│   │   │               ├── infrastructure/                  # ⬅️ Mapped from NestJS "infrastructure/"
+│   │   │               │   ├── persistence/                 # Database layer
+│   │   │               │   │   ├── BaseEntity.java          # Auditing (CreatedAt, etc.)
+│   │   │               │   │   ├── TransactionService.java  # Programmatic TX management
+│   │   │               │   │   └── SpecificationBuilder.java # For dynamic queries
+│   │   │               │   ├── cache/                       # Redis/Redisson
+│   │   │               │   │   └── RedisService.java
+│   │   │               │   ├── storage/                     # File storage (S3/MinIO)
+│   │   │               │   │   ├── StorageService.java      # Interface
+│   │   │               │   │   ├── S3StorageServiceImpl.java
+│   │   │               │   │   └── LocalStorageServiceImpl.java
+│   │   │               │   ├── messaging/                   # Queue (BullMQ analog -> RabbitMQ/Kafka or Spring Events)
+│   │   │               │   │   ├── QueueNames.java
+│   │   │               │   │   ├── JobProducer.java         # Send to queue
+│   │   │               │   │   └── MailService.java
+│   │   │               │   └── observability/               # Health & Metrics
+│   │   │               │       ├── HealthController.java
+│   │   │               │       └── MetricsController.java
+│   │   │               │
+│   │   │               ├── modules/                          # ⬅️ Mapped from NestJS "modules/"
+│   │   │               │   ├── auth/                        # Authentication
+│   │   │               │   │   ├── AuthController.java
+│   │   │               │   │   ├── AuthService.java
+│   │   │               │   │   └── AuthRequestDto.java
+│   │   │               │   ├── user/                        # Users & Profiles
+│   │   │               │   │   ├── UserController.java
+│   │   │               │   │   ├── UserService.java
+│   │   │               │   │   ├── UserEntity.java
+│   │   │               │   │   └── UserRepository.java
+│   │   │               │   ├── rbac/                       # Roles & Permissions
+│   │   │               │   ├── store/                      # Store management
+│   │   │               │   ├── product/                    # Products & Categories
+│   │   │               │   │   ├── ProductController.java
+│   │   │               │   │   ├── ProductService.java
+│   │   │               │   │   ├── ProductEntity.java
+│   │   │               │   │   └── ProductRepository.java
+│   │   │               │   ├── order/                      # Orders
+│   │   │               │   ├── payment/                    # Payments & KHQR
+│   │   │               │   ├── inventory/                  # Stock & Ingredients
+│   │   │               │   ├── promotion/                  # Promotions
+│   │   │               │   ├── notification/               # Notifications
+│   │   │               │   ├── analytics/                  # Reports/Dashboards
+│   │   │               │   ├── audit/                      # Audit logs
+│   │   │               │   └── setting/                    # System settings
+│   │   │               │
+│   │   │               ├── jobs/                            # ⬅️ Mapped from NestJS "jobs/"
+│   │   │               │   ├── NotificationProcessor.java  # @Async or Scheduled
+│   │   │               │   ├── ReceiptProcessor.java
+│   │   │               │   ├── CartExpirationScheduler.java
+│   │   │               │   ├── PromotionStatusScheduler.java
+│   │   │               │   └── InventoryReconciliationScheduler.java
+│   │   │               │
+│   │   │               └── websocket/                       # ⬅️ Mapped from NestJS "websocket/"
+│   │   │                   ├── WebSocketEventListener.java
+│   │   │                   ├── OrderStatusGateway.java      # @MessageMapping / SimpMessagingTemplate
+│   │   │                   └── NotificationGateway.java
+│   │   │
+│   │   └── resources/
+│   │       ├── application.yml                              # Main config (instead of .yaml)
+│   │       ├── application-local.yml
+│   │       ├── application-prod.yml
+│   │       ├── db/
+│   │       │   └── migration/                              # Flyway/Liquibase migrations
+│   │       ├── static/                                      # Static assets
+│   │       └── templates/                                   # Email templates (Thymeleaf)
+│   │
+│   └── test/
+│       ├── java/
+│       │   └── com/smartcoffee/identity/
+│       │       ├── unit/                                    # Unit tests
+│       │       ├── integration/                             # Integration tests (DB, Redis)
+│       │       ├── e2e/                                     # E2E (@SpringBootTest)
+│       │       ├── fixtures/                                # Test data fixtures
+│       │       ├── factories/                               # Test factories
+│       │       └── TestcontainersConfiguration.java
+│       └── resources/
+│
+├── target/
+├── .gitattributes
+├── .gitignore
+├── compose.yaml                                             # Docker Compose (Postgres, Redis, MinIO)
+├── Dockerfile
+├── HELP.md
+├── mvnw
+├── mvnw.cmd
+└── pom.xml                                                  # Dependencies)

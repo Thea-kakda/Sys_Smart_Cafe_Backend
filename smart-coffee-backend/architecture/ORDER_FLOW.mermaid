@@ -1,0 +1,64 @@
+sequenceDiagram
+    autonumber
+    actor Client
+    participant API as Order API
+    participant Auth as Authorization
+    participant Idem as Idempotency Store
+    participant Store as Store Module
+    participant Catalog as Catalog Module
+    participant Promo as Promotion Module
+    participant Inventory as Inventory Module
+    participant Order as Order Module
+    participant DB as PostgreSQL
+    participant Outbox as Outbox Relay
+    participant MQ as RabbitMQ
+
+    Client->>API: POST /api/v1/orders + Idempotency-Key
+    API->>Auth: Verify user, store scope, ORDER_CREATE
+    alt Unauthorized store or permission
+        Auth-->>API: Denied
+        API-->>Client: 403 Forbidden
+    else Authorized
+        Auth-->>API: Authorized actor and store
+        API->>Idem: Claim scope + key + request hash
+        alt Existing completed request with same hash
+            Idem-->>API: Stored original result
+            API-->>Client: Original response
+        else Same key with different hash
+            Idem-->>API: Conflict
+            API-->>Client: 409 Idempotency conflict
+        else New request
+            Note over API,DB: Begin local PostgreSQL transaction
+            API->>Store: Validate active store and opening policy
+            API->>Catalog: Load authoritative products, prices, tax and options
+            Catalog-->>API: Validated pricing snapshots
+            API->>Promo: Evaluate promotion and reserve redemption
+            Promo-->>API: Discount snapshot or rejection
+            API->>Inventory: Convert the cart's persisted reservation snapshot (Slice 2D)
+            alt The cart line never held stock
+                Inventory->>Inventory: Calculate its demand once and reserve only that part
+            end
+            alt The legacy part is insufficient
+                Inventory-->>API: Reservation failed
+                API->>Idem: Store deterministic failure where policy allows
+                Note over API,DB: Roll back transaction (cart holds stay ACTIVE)
+                API-->>Client: 409 Insufficient stock
+            else Ownership converted
+                Inventory-->>API: Reservation ID (no release, no second reservation)
+                API->>Order: Create order aggregate and immutable lines
+                Order->>DB: Insert order, items and status history
+                Order->>DB: Insert OrderPlaced.v1 into outbox
+                API->>Idem: Store resource ID and response
+                Note over API,DB: Commit transaction
+                API-->>Client: 201 Created with server totals
+                Outbox->>DB: Poll unpublished outbox rows
+                Outbox->>MQ: Publish OrderPlaced.v1
+                Outbox->>DB: Mark event published
+            end
+        end
+    end
+
+    Note over Client,API: Client never sends authoritative prices, tax, discount or total
+    Note over Inventory,Order: Checkout converts cart holds; the order's payment settlement consumes them exactly once
+    Note over Inventory,Order: All reservation changes succeed or fail in one transaction
+    Note over Inventory,Order: Slice 2E: multi-node expiry workers release abandoned unpaid holds (SKIP LOCKED claim); a settled-but-unconsumed order is recovered via consumeOrder, never released; reconciliation dry-runs and an admin single-hold release are the operator levers (see INVENTORY_FLOW)

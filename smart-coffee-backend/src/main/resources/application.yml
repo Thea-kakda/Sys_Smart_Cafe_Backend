@@ -1,0 +1,188 @@
+spring:
+  application:
+    name: smart-coffee-api
+
+  # File uploads. Kept aligned with app.storage.max-file-size-bytes (10 MiB);
+  # the request limit adds headroom for the multipart envelope. Oversize
+  # requests are rejected here, before the object reaches the storage layer.
+  servlet:
+    multipart:
+      enabled: true
+      max-file-size: ${STORAGE_MAX_FILE_SIZE_BYTES:10MB}
+      max-request-size: 11MB
+
+  docker:
+    compose:
+      lifecycle-management: start-only
+
+  profiles:
+    default: local
+
+  data:
+    redis:
+      repositories:
+        enabled: false
+
+  datasource:
+    url: ${DATABASE_URL:jdbc:postgresql://127.0.0.1:5433/smart_coffee}
+    username: ${DATABASE_USERNAME:smart_coffee}
+    password: ${DATABASE_PASSWORD:smart_coffee}
+    driver-class-name: org.postgresql.Driver
+
+  jpa:
+    hibernate:
+      ddl-auto: none
+    open-in-view: false
+    properties:
+      hibernate:
+        format_sql: true
+        jdbc:
+          time_zone: UTC
+
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+    validate-on-migrate: true
+    clean-disabled: true
+
+  rabbitmq:
+    publisher-confirm-type: correlated
+    publisher-returns: true
+
+app:
+  minio:
+    endpoint: ${MINIO_ENDPOINT:http://localhost:9000}
+    access-key: ${MINIO_ACCESS_KEY:minioadmin}
+    secret-key: ${MINIO_SECRET_KEY:minioadmin}
+    # Single private bucket for the whole application. Callers never choose a
+    # bucket; they address objects by key under an allowed prefix.
+    bucket: ${MINIO_BUCKET:smart-coffee-storage}
+
+  # Object-storage safety policy. Prefixes are the only allowed top-level key
+  # segments; uploads are bounded by size and content type. Kept configurable so
+  # business rules can evolve without code changes.
+  storage:
+    allowed-prefixes:
+      - products/
+      - categories/
+      - users/
+      - invoices/
+      - receipts/
+      - documents/
+    allowed-content-types:
+      - image/jpeg
+      - image/png
+      - image/webp
+      - application/pdf
+      - text/plain
+    max-file-size-bytes: ${STORAGE_MAX_FILE_SIZE_BYTES:10485760}
+    signed-url-ttl-seconds: ${STORAGE_SIGNED_URL_TTL_SECONDS:900}
+
+  security:
+    jwt:
+      secret: ${JWT_HMAC_SECRET_BASE64:VGhpcy1pcy1hLWRldmVsb3BtZW50LW9ubHktand0LXNlY3JldC10aGF0LW11c3QtYmUtcmVwbGFjZWQtaW4tcHJvZHVjdGlvbg==}
+      access-token-minutes: 15
+      refresh-token-days: 30
+    # Explicit CORS origins for the Dashboard, POS and Customer Web apps.
+    # Comma-separated; never use "*" together with credentials. Override per env.
+    # POS runs on 3005 (localhost and 127.0.0.1 variants) exactly like the
+    # WebSocket list below — omitting it made browser logins fail with 403
+    # "Invalid CORS request" because the proxy forwards the browser's Origin.
+    # Also include :3001 for both hosts (Next.js falls back to 3001 when 3000
+    # is occupied by another dev server) and 127.0.0.1:5173 (Vite Dashboard
+    # opened via 127.0.0.1). Spring's CorsFilter rejects unmatched Origin
+    # headers with 403 before permitAll() on /api/v1/auth/login is reached.
+    cors:
+      allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:3000,http://localhost:3001,http://localhost:5173,http://localhost:3005,http://127.0.0.1:3000,http://127.0.0.1:3001,http://127.0.0.1:3005,http://127.0.0.1:5173}
+    # Refresh-cookie hardening. secure MUST be true behind HTTPS in production.
+    cookie:
+      secure: ${COOKIE_SECURE:false}
+      same-site: ${COOKIE_SAME_SITE:Lax}
+
+  catalog:
+    # Catalog images live in the private bucket. Public read is gone; the API
+    # returns short-lived presigned GET URLs instead of a permanent base URL.
+    image-url-ttl-seconds: ${CATALOG_IMAGE_URL_TTL_SECONDS:900}
+
+  cart:
+    expiration-poll-ms: 60000
+
+  inventory:
+    # Order-reservation expiry worker (Slice 2E §6). Bounded batch, per-reservation
+    # own transaction, stale-claim reclaim, and a dead-letter attempt ceiling so a
+    # reservation that keeps failing transiently stops being hot-looped.
+    expiration-poll-ms: 60000
+    expiry-batch-size: ${INVENTORY_EXPIRY_BATCH_SIZE:50}
+    expiry-max-attempts: ${INVENTORY_EXPIRY_MAX_ATTEMPTS:5}
+    expiry-stale-claim: ${INVENTORY_EXPIRY_STALE_CLAIM:PT5M}
+    # Reconciliation scan is read-only by default (dry-run). A global (storeId=null)
+    # scan touches every active store; this bounds how many stores one run sweeps so
+    # the report stays prompt and cannot fan out unboundedly.
+    reconciliation-global-store-cap: ${INVENTORY_RECON_GLOBAL_STORE_CAP:200}
+    # Bounded operational collector (§17/§18): publishes low-cardinality gauges and
+    # caches the latest snapshot the health component reads. The health gate reports
+    # DOWN once the snapshot is older than stale-after (its worker has stopped).
+    gauge-poll-ms: ${INVENTORY_GAUGE_POLL_MS:120000}
+    health:
+      stale-after: ${INVENTORY_HEALTH_STALE_AFTER:PT15M}
+
+  payment:
+    expiration-poll-ms: 60000
+
+  # Receipt issuance (corrective receipt slice). The queue carries the durable
+  # ReceiptRequested event emitted inside the settlement transaction; the
+  # recovery worker retries stranded PENDING/FAILED rows with bounded attempts
+  # and exponential backoff (capped at 300s, like the outbox).
+  receipt:
+    queue: ${RECEIPT_QUEUE:smartcoffee.receipts}
+    recovery-poll-ms: ${RECEIPT_RECOVERY_POLL_MS:60000}
+    recovery-batch-size: ${RECEIPT_RECOVERY_BATCH_SIZE:50}
+    recovery-max-attempts: ${RECEIPT_RECOVERY_MAX_ATTEMPTS:5}
+    recovery-pending-min-age: ${RECEIPT_RECOVERY_PENDING_MIN_AGE:PT2M}
+    recovery-stale-claim: ${RECEIPT_RECOVERY_STALE_CLAIM:PT5M}
+
+  # Bounded retry for recognized TRANSIENT database failures only (§15): SQLState
+  # 40001/40P01 and optimistic-locking. Each attempt runs in its own REQUIRES_NEW
+  # transaction; business/validation/permission errors are never retried.
+  retry:
+    max-attempts: ${RETRY_MAX_ATTEMPTS:3}
+    base-backoff-ms: ${RETRY_BASE_BACKOFF_MS:20}
+
+  notification:
+    queue: smartcoffee.notification
+    poll-ms: 2000
+
+  outbox:
+    batch-size: 50
+    poll-delay-ms: 1000
+
+  websocket:
+    # Dev frontends connect cross-origin to the STOMP broker from the POS port
+    # (3005) as well as the legacy 3000. Exact origins only; override per env.
+    allowed-origins: ${WEBSOCKET_ALLOWED_ORIGINS:http://localhost:3000,http://localhost:3005,http://127.0.0.1:3000,http://127.0.0.1:3005}
+
+  # Receipts are stored in the shared private bucket under the 'receipts/'
+  # prefix (see app.minio.bucket + app.storage.allowed-prefixes).
+
+  # Bootstrap Super Admin: env-driven and OFF by default. Local/dev opt in via
+  # the git-ignored .env. Values are never logged or committed.
+  bootstrap:
+    superadmin:
+      enabled: ${BOOTSTRAP_SUPERADMIN_ENABLED:false}
+      full-name: ${BOOTSTRAP_SUPERADMIN_FULL_NAME:}
+      email: ${BOOTSTRAP_SUPERADMIN_EMAIL:}
+      password: ${BOOTSTRAP_SUPERADMIN_PASSWORD:}
+
+management:
+  endpoint:
+    health:
+      probes:
+        enabled: true
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus
+
+logging:
+  level:
+    org.flywaydb: DEBUG

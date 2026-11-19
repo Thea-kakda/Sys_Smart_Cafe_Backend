@@ -1,0 +1,18 @@
+spring:
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    open-in-view: false
+  flyway:
+    enabled: true
+  task:
+    scheduling:
+      enabled: false
+app:
+  security:
+    jwt:
+      secret: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=
+      access-token-minutes: 15
+      refresh-token-days: 30
+  websocket:
+    allowed-origins: http://localhost:3000

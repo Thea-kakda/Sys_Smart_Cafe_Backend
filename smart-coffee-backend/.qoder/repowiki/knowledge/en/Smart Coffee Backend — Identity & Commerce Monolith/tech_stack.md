@@ -1,0 +1,1 @@
+Spring Boot 4.1.1 (Java 26 source/target, compiled with JDK 17), Spring Data JPA + PostgreSQL driver, Flyway migrations, Spring Security OAuth2 Resource Server (JWT), Spring Data Redis, Spring AMQP/RabbitMQ, MinIO object storage, Bouncy Castle cryptography, Springdoc OpenAPI UI, Micrometer Prometheus metrics, Spring Boot Admin, Testcontainers for integration testing.

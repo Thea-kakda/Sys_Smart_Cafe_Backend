@@ -1,0 +1,14 @@
+HTTP/1.1 500 
+X-Request-Id: 9bb83874-98ba-43fd-9533-92886b2ab19c
+X-Correlation-Id: af5e4fee-43b4-4bc7-af59-bbf43952baa0
+X-Content-Type-Options: nosniff
+X-XSS-Protection: 0
+Cache-Control: no-cache, no-store, max-age=0, must-revalidate
+Pragma: no-cache
+Expires: 0
+X-Frame-Options: DENY
+Content-Type: application/json
+Transfer-Encoding: chunked
+Date: Mon, 28 Sep 2026 09:21:58 GMT
+Connection: close
+

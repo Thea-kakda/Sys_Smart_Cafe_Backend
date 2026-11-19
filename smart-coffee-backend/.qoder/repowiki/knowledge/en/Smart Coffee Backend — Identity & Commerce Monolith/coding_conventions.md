@@ -1,0 +1,6 @@
+- Domain logic is grouped per business module under `modules/<domain>/` with subpackages for entities, repositories, services, and controllers, keeping each bounded context self-contained.
+- Cross-cutting concerns are isolated in `common/` (shared API envelopes like `ApiResponse`/`ApiErrorResponse`, global exception hierarchy, money types, JPA base entities, security utilities) rather than duplicated inside modules.
+- Infrastructure adapters (payment providers, message brokers, cache, storage, notifications) are implemented under `infrastructure/<area>/` and wired via Spring configuration classes in `config/`, keeping domain code free of external SDK calls.
+- Database schema evolution follows Flyway conventions with versioned SQL migration files (`VNNN__<description>.sql`) under `resources/db/migration/`, applied automatically at startup.
+- Integration tests are placed under `test/java` with `*IT.java` naming and rely on Testcontainers for Postgres and RabbitMQ, executed through the Failsafe plugin during `mvn verify`.
+- External services are provisioned declaratively in `compose.yaml` with health checks and Spring Boot service-connection labels so the app auto-discovers Redis and other containers.

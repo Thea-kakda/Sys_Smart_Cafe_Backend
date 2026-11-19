@@ -1,0 +1,96 @@
+sequenceDiagram
+    autonumber
+    participant Order as Ordering Module
+    participant Recipe as Recipe Module
+    participant Inventory as Inventory Module
+    participant DB as PostgreSQL
+    participant Outbox as Outbox Relay
+    participant Worker as Expiry/Recovery Workers (Slice 2E)
+    participant Recon as Reconciliation/Admin (Slice 2E)
+    participant MQ as RabbitMQ
+    participant Analytics as Analytics Consumer
+
+    Order->>Recipe: Calculate ingredient demand from order snapshots
+    Recipe-->>Order: Ingredient quantities and recipe version
+    Order->>Inventory: Convert(cartId, orderId, orderLines) at checkout (Slice 2D)
+
+    Note over Inventory,DB: Begin local transaction
+    Inventory->>DB: Lock the cart's ACTIVE holds (ascending cart item id)
+    alt Nothing held (legacy cart line)
+        Order->>Inventory: Demand calculated once through ConsumptionPlanService
+        Inventory->>DB: Atomic conditional reserved_stock increment for that part only
+    end
+    Inventory->>DB: Copy the persisted cart snapshot into ONE order reservation
+    Inventory->>DB: Mark each cart hold CONVERTED (order id, order line, target reservation)
+    Note over Inventory,DB: Ownership moves as metadata: reserved_stock and current_stock do not move and no SALE_RELEASE is written
+    Inventory->>DB: Insert InventoryReserved.v1 into outbox
+    Note over Inventory,DB: Commit transaction
+    Inventory-->>Order: Reservation ID
+
+    Order->>Inventory: Consume(orderId) when the payment settles (Slice 2D)
+    Inventory->>DB: Lock reservation by orderId
+    alt Reservation is ACTIVE
+        Inventory->>DB: Decrease current_stock and reserved_stock by the snapshot quantity
+        Inventory->>DB: Insert exactly one immutable SALE_CONSUMPTION ledger transaction
+        Inventory->>DB: Mark reservation CONSUMED
+        Inventory->>DB: Insert InventoryConsumed.v1 into outbox
+        DB-->>Inventory: Commit
+    else Reservation already CONSUMED
+        Inventory-->>Order: Idempotent success
+    else Reservation not consumable
+        Inventory-->>Order: 409 Invalid reservation state
+    end
+
+    opt Order cancelled or payment window expired before settlement
+        Order->>Inventory: Release(orderId, ORDER_CANCELLED | PAYMENT_FAILED)
+        Inventory->>DB: Lock reservation by orderId
+        alt Reservation is ACTIVE
+            Inventory->>DB: Decrease reserved_stock only
+            Inventory->>DB: Insert one SALE_RELEASE ledger transaction
+            Inventory->>DB: Mark reservation RELEASED
+            Inventory->>DB: Insert InventoryReleased.v1 into outbox
+            DB-->>Inventory: Commit
+        else Reservation already RELEASED
+            Inventory-->>Order: Idempotent success
+        else Reservation already CONSUMED
+            Inventory-->>Order: No automatic return; require waste or adjustment decision
+        end
+    end
+
+    Note over Worker,DB: Slice 2E multi-node expiry and recovery (safe to run on every node at once)
+    Worker->>DB: Claim expired ACTIVE order holds FOR UPDATE SKIP LOCKED, stamp processing_owner/token/attempts (V047)
+    alt Order is AWAITING_PAYMENT and not settled
+        Worker->>DB: Expire the order and releaseOrder(ORDER_RESERVATION_EXPIRED) in its own transaction
+    else Order payment is SETTLED but the hold is still ACTIVE (crash after settlement)
+        Worker->>Inventory: PaidOrderRecoveryService.recover(orderId)
+        alt All nine recovery conditions hold
+            Inventory->>DB: consumeOrder — decrease current_stock and reserved_stock, one SALE_CONSUMPTION, mark CONSUMED
+        else Ambiguous settlement
+            Inventory-->>Worker: MANUAL_REVIEW — leave the hold untouched, never auto-release a paid order
+        end
+    else Payment ambiguous
+        Worker->>DB: Skip now, reclaimable after the stale-claim window
+    end
+    Note over Recon,DB: Slice 2E reconciliation is a derived read; a dry run writes report rows only
+    Recon->>DB: Scan derived reserved vs recorded balance and the join-based detectors
+    Recon->>DB: Insert inventory_reconciliation_runs and inventory_reconciliation_findings (no balance or ledger write on a dry run)
+    opt A repairable finding (cancelled-order hold, or a provably settled unconsumed order)
+        Recon->>Inventory: repair(findingId) through the guarded primitive, revalidated live under lock
+        Inventory->>DB: releaseOrder(DATA_RECOVERY) or consumeOrder — exactly one terminal ledger row, never both
+    end
+    opt Administrator releases one abandoned ACTIVE hold
+        Recon->>Inventory: AdminReservationReleaseService.release(reservationId, expectedVersion, reason, idempotencyKey)
+        alt Reservation is ACTIVE and in the caller's store scope
+            Inventory->>DB: Decrease reserved_stock only, insert one SALE_RELEASE (ADMIN_RELEASE), mark RELEASED
+        else CONSUMED or SETTLED or CONVERTED
+            Inventory-->>Recon: 409 stable conflict
+        end
+    end
+
+    Outbox->>MQ: Publish inventory events
+    MQ->>Analytics: Deliver event
+    Analytics->>DB: Deduplicate with consumer inbox and update projection
+
+    Note over Inventory,DB: Available stock equals current_stock minus reserved_stock
+    Note over Inventory,DB: One SALE_CONSUMPTION per reservation, enforced by uk_stock_consumption_reservation
+    Note over Inventory,DB: Stock ledger rows are append-only and are not edited or deleted

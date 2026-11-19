@@ -1,0 +1,96 @@
+graph TD
+    subgraph Clients["Client Applications"]
+        MA[Customer Mobile App - React Native]
+        WA[Customer Web App - Next.js]
+        AD[Admin Dashboard - Next.js]
+        POS[POS Terminal - Desktop/Web]
+    end
+
+    subgraph GatewayLayer["API Gateway Layer"]
+        GW[Spring Cloud API Gateway]
+        RL[Redis Rate Limiter]
+        GW --- RL
+    end
+
+    subgraph IdentityDomain["Identity & Access Domain"]
+        ID_SVC[Identity Service]
+        ID_DB[(identity_db - PG 16)]
+        ID_SVC --- ID_DB
+    end
+
+    subgraph CoreServices["Core Domain Microservices (Spring Boot 4)"]
+        ORG_SVC[Organization / Store Service]
+        CAT_SVC[Catalog Service]
+        CART_SVC[Cart Service]
+        ORD_SVC[Order Service]
+        PAY_SVC[Payment Service]
+        INV_SVC[Inventory Service]
+        REC_SVC[Recipe & Production Service]
+        PROMO_SVC[Promotion & Loyalty Service]
+        NOTIF_SVC[Notification Service]
+        SCHED_SVC[Scheduler / CRON Service]
+    end
+
+    subgraph DataStore["Database Per Service Layer"]
+        ORG_DB[(store_db)]
+        CAT_DB[(catalog_db)]
+        CART_DB[(cart_db)]
+        ORD_DB[(order_db)]
+        PAY_DB[(payment_db)]
+        INV_DB[(inventory_db)]
+        REC_DB[(recipe_db)]
+        PROMO_DB[(promotion_db)]
+        NOTIF_DB[(notification_db)]
+        SCHED_DB[(scheduler_db)]
+    end
+
+    subgraph EventInfra["Asynchronous Messaging & Cache"]
+        KAFKA{{Apache Kafka Event Bus}}
+        REDIS[(Redis Cluster - Cache/Locks)]
+    end
+
+    subgraph AnalyticsDomain["CQRS & Reporting Domain"]
+        REP_SVC[Reporting & Analytics Service]
+        REP_DB[(reporting_db - Read Replica/Analytics)]
+        REP_SVC --- REP_DB
+    end
+
+    %% Routing
+    Clients -->|HTTPS / REST / WSS| GW
+    GW -->|Validate JWT| ID_SVC
+    GW --> ORG_SVC
+    GW --> CAT_SVC
+    GW --> CART_SVC
+    GW --> ORD_SVC
+    GW --> PAY_SVC
+    GW --> INV_SVC
+    GW --> REC_SVC
+    GW --> PROMO_SVC
+
+    %% DB Connections
+    ORG_SVC --- ORG_DB
+    CAT_SVC --- CAT_DB
+    CART_SVC --- CART_DB
+    ORD_SVC --- ORD_DB
+    PAY_SVC --- PAY_DB
+    INV_SVC --- INV_DB
+    REC_SVC --- REC_DB
+    PROMO_SVC --- PROMO_DB
+    NOTIF_SVC --- NOTIF_DB
+    SCHED_SVC --- SCHED_DB
+
+    %% Event Connections
+    ORD_SVC ==>|Outbox Event| KAFKA
+    PAY_SVC ==>|Outbox Event| KAFKA
+    INV_SVC ==>|Outbox Event| KAFKA
+    PROMO_SVC ==>|Outbox Event| KAFKA
+    
+    KAFKA ==> NOTIF_SVC
+    KAFKA ==> REP_SVC
+    KAFKA ==> REC_SVC
+    KAFKA ==> ORD_SVC
+
+    %% Shared Caching
+    CAT_SVC --- REDIS
+    CART_SVC --- REDIS
+    ORD_SVC --- REDIS
